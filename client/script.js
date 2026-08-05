@@ -22,7 +22,7 @@ function log(msg, type = "sys") {
   if (type === "action") color = "text-indigo-400";
 
   entry.className = `${color} leading-relaxed`;
-  entry.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}`;
   logBox.appendChild(entry);
   logBox.scrollTop = logBox.scrollHeight;
 }
@@ -166,38 +166,7 @@ function setupDataChannelHandlers() {
       // Regular text chat message
       log(`Peer Message: "${event.data}"`, "peer");
     } else {
-      // 2. It's a raw binary ArrayBuffer chunk! Reassemble it:
-      receivedBuffers.push(event.data);
-      receivedSize += event.data.byteLength;
-
-      // Calculate progress percentage
-      if (incomingFileMeta) {
-        const progress = Math.round(
-          (receivedSize / incomingFileMeta.size) * 100,
-        );
-        if (progress % 25 === 0) {
-          log(`Receiving file progress: ${progress}%`, "sys");
-        }
-
-        // Check if transfer is complete
-        if (receivedSize >= incomingFileMeta.size) {
-          log(`🎉 File received completely! Creating download link...`, "peer");
-
-          const completeBlob = new Blob(receivedBuffers);
-          const downloadUrl = URL.createObjectURL(completeBlob);
-
-          // Inject a clickable download link into the log box
-          log(
-            `✅ Ready: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-indigo-400 underline font-bold" target="_blank">Download ${incomingFileMeta.name}</a>`,
-            "peer",
-          );
-
-          // Reset state for next file
-          incomingFileMeta = null;
-          receivedBuffers = [];
-          receivedSize = 0;
-        }
-      }
+      handleIncomingData(event);
     }
   };
 }
@@ -379,7 +348,7 @@ function handleIncomingData(event) {
 
       // Create a clickable download link in your log box or UI
       log(
-        `Ready for download: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-indigo-400 underline font-bold">Click here to save ${incomingFileMeta.name}</a>`,
+        `✅ Ready for download: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-indigo-400 underline font-bold">${incomingFileMeta.name}</a>`,
         "peer",
       );
 
