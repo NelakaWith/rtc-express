@@ -64,5 +64,4 @@ Or just double-click `client/index.html`.
 - TypeScript & `tsx`
 
 ## License
-
 MIT
