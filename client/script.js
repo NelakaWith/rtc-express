@@ -143,9 +143,62 @@ function setupDataChannelHandlers() {
   };
 
   // Handle incoming chat payloads sent directly over the UDP-backed data channel
-  dataChannel.onmessage = (e) => {
-    log(`Peer Message: "${e.data}"`, "peer");
-    handleIncomingData(e);
+  dataChannel.onmessage = (event) => {
+    // 1. Check if the incoming packet is a text message (JSON metadata)
+    if (typeof event.data === "string") {
+      try {
+        const message = JSON.parse(event.data);
+
+        if (message.signal === "file-meta") {
+          incomingFileMeta = message;
+          receivedBuffers = [];
+          receivedSize = 0;
+          log(
+            `📥 Incoming file: ${incomingFileMeta.name} (${incomingFileMeta.size} bytes)`,
+            "peer",
+          );
+          return; // Stop here so it doesn't log as a generic chat message
+        }
+      } catch (e) {
+        // Not JSON, treat as a normal chat message
+      }
+
+      // Regular text chat message
+      log(`Peer Message: "${event.data}"`, "peer");
+    } else {
+      // 2. It's a raw binary ArrayBuffer chunk! Reassemble it:
+      receivedBuffers.push(event.data);
+      receivedSize += event.data.byteLength;
+
+      // Calculate progress percentage
+      if (incomingFileMeta) {
+        const progress = Math.round(
+          (receivedSize / incomingFileMeta.size) * 100,
+        );
+        if (progress % 25 === 0) {
+          log(`Receiving file progress: ${progress}%`, "sys");
+        }
+
+        // Check if transfer is complete
+        if (receivedSize >= incomingFileMeta.size) {
+          log(`🎉 File received completely! Creating download link...`, "peer");
+
+          const completeBlob = new Blob(receivedBuffers);
+          const downloadUrl = URL.createObjectURL(completeBlob);
+
+          // Inject a clickable download link into the log box
+          log(
+            `✅ Ready: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-indigo-400 underline font-bold" target="_blank">Download ${incomingFileMeta.name}</a>`,
+            "peer",
+          );
+
+          // Reset state for next file
+          incomingFileMeta = null;
+          receivedBuffers = [];
+          receivedSize = 0;
+        }
+      }
+    }
   };
 }
 
@@ -232,10 +285,10 @@ function sendFile(file) {
   // Step A: Send metadata packet first so the receiver knows what to expect
   dataChannel.send(
     JSON.stringify({
-      type: "file-meta",
+      signal: "file-meta", // <-- Explicit signal tag
       name: file.name,
       size: file.size,
-      type: file.type,
+      fileType: file.type,
     }),
   );
 
