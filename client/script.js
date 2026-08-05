@@ -3,8 +3,10 @@ const statusBadge = document.getElementById("connection-status");
 const roomInput = document.getElementById("room-input");
 const msgInput = document.getElementById("msg-input");
 const sendBtn = document.getElementById("btn-send");
+const sendFileBtn = document.getElementById("btn-file-send");
 const callerBtn = document.getElementById("btn-caller");
 const calleeBtn = document.getElementById("btn-callee");
+const fileInput = document.getElementById("file-input");
 
 let ws = null;
 let pc = null;
@@ -125,17 +127,25 @@ function setupDataChannelHandlers() {
     msgInput.disabled = false;
     sendBtn.disabled = false;
     sendBtn.classList.remove("cursor-not-allowed");
+
+    fileInput.disabled = false;
+    sendFileBtn.disabled = false;
+    sendFileBtn.classList.remove("cursor-not-allowed");
   };
 
   dataChannel.onclose = () => {
     log("Data Channel closed", "err");
     msgInput.disabled = true;
     sendBtn.disabled = true;
+
+    fileInput.disabled = true;
+    sendFileBtn.disabled = true;
   };
 
   // Handle incoming chat payloads sent directly over the UDP-backed data channel
   dataChannel.onmessage = (e) => {
     log(`Peer Message: "${e.data}"`, "peer");
+    handleIncomingData(e);
   };
 }
 
@@ -201,3 +211,129 @@ msgInput.addEventListener("keypress", (e) => {
 document.getElementById("btn-clear").addEventListener("click", () => {
   logBox.innerHTML = '<div class="text-slate-500">// Log cleared.</div>';
 });
+
+// -------------------------------------------
+// 🗃️ File handling through binary streaming
+// -------------------------------------------
+
+// ==========================================
+// 1. SENDER SIDE: Binary Chunker & Backpressure
+// ==========================================
+let selectedFile = null;
+const CHUNK_SIZE = 64 * 1024; // 64KB per chunk
+let offset = 0;
+let fileToSend = null;
+const reader = new FileReader();
+
+function sendFile(file) {
+  fileToSend = file;
+  offset = 0;
+
+  // Step A: Send metadata packet first so the receiver knows what to expect
+  dataChannel.send(
+    JSON.stringify({
+      type: "file-meta",
+      name: file.name,
+      size: file.size,
+      type: file.type,
+    }),
+  );
+
+  log(`Starting file transfer: ${file.name} (${file.size} bytes)`, "action");
+  readNextChunk();
+}
+
+sendFileBtn.addEventListener("click", () => {
+  if (fileInput.files && fileInput.files[0]) {
+    selectedFile = fileInput.files[0];
+    sendFile(selectedFile);
+  }
+});
+
+function readNextChunk() {
+  if (!fileToSend) return;
+
+  // Backpressure Control: Check if browser's internal network buffer is too full
+  const MAX_BUFFERED_AMOUNT = 64 * 1024 * 1024; // 1MB safety threshold
+  if (dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+    // Pause and wait for buffer to drain via low-water mark event
+    dataChannel.onbufferedamountlow = () => {
+      dataChannel.onbufferedamountlow = null; // Reset handler
+      readNextChunk();
+    };
+    return;
+  }
+
+  const slice = fileToSend.slice(offset, offset + CHUNK_SIZE);
+  reader.readAsArrayBuffer(slice);
+}
+
+reader.onload = (e) => {
+  const buffer = e.target.result;
+
+  // Send raw binary ArrayBuffer directly through the P2P data channel
+  dataChannel.send(buffer);
+
+  offset += buffer.byteLength;
+
+  // Update progress percentage
+  const progress = Math.round((offset / fileToSend.size) * 100);
+  if (progress % 20 === 0) {
+    log(`File transfer progress: ${progress}%`, "sys");
+  }
+
+  if (offset < fileToSend.size) {
+    readNextChunk();
+  } else {
+    log("🎉 File transmission complete!", "peer");
+    fileToSend = null;
+  }
+};
+
+// ==========================================
+// 2. RECEIVER SIDE: Reassembly & Download
+// ==========================================
+let incomingFileMeta = null;
+let receivedBuffers = [];
+let receivedSize = 0;
+
+function handleIncomingData(event) {
+  // Check if the incoming packet is a text control message (Metadata) or raw binary chunk
+  if (typeof event.data === "string") {
+    const message = JSON.parse(event.data);
+
+    if (message.type === "file-meta") {
+      incomingFileMeta = message;
+      receivedBuffers = [];
+      receivedSize = 0;
+      log(
+        `Incoming file detected: ${incomingFileMeta.name} (${incomingFileMeta.size} bytes)`,
+        "peer",
+      );
+    }
+  } else {
+    // It's a raw binary ArrayBuffer chunk! Push it into our staging array
+    receivedBuffers.push(event.data);
+    receivedSize += event.data.byteLength;
+
+    // Check if we have received all bytes
+    if (incomingFileMeta && receivedSize >= incomingFileMeta.size) {
+      log(`📥 File received completely! Reassembling blob...`, "peer");
+
+      // Combine all ArrayBuffers into a single massive Blob
+      const completeBlob = new Blob(receivedBuffers);
+      const downloadUrl = URL.createObjectURL(completeBlob);
+
+      // Create a clickable download link in your log box or UI
+      log(
+        `Ready for download: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-indigo-400 underline font-bold">Click here to save ${incomingFileMeta.name}</a>`,
+        "peer",
+      );
+
+      // Reset state
+      incomingFileMeta = null;
+      receivedBuffers = [];
+      receivedSize = 0;
+    }
+  }
+}
