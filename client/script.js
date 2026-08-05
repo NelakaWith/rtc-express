@@ -1,5 +1,6 @@
 const logBox = document.getElementById("log-box");
 const statusBadge = document.getElementById("connection-status");
+const statusDot = document.getElementById("status-dot");
 const roomInput = document.getElementById("room-input");
 const msgInput = document.getElementById("msg-input");
 const sendBtn = document.getElementById("btn-send");
@@ -16,13 +17,13 @@ let currentRoom = "";
 // Helper logging utility to track state transitions in the UI log box
 function log(msg, type = "sys") {
   const entry = document.createElement("div");
-  let color = "text-slate-400";
-  if (type === "peer") color = "text-emerald-400 font-semibold";
+  let color = "text-zinc-400";
+  if (type === "peer") color = "text-emerald-400 font-medium";
   if (type === "err") color = "text-rose-400";
   if (type === "action") color = "text-indigo-400";
 
   entry.className = `${color} leading-relaxed`;
-  entry.innerHTML = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  entry.innerHTML = `<span class="text-zinc-600 mr-2">[${new Date().toLocaleTimeString()}]</span> ${msg}`;
   logBox.appendChild(entry);
   logBox.scrollTop = logBox.scrollHeight;
 }
@@ -34,9 +35,8 @@ function connectSignaling() {
 
   ws.onopen = () => {
     log("Connected to signaling server", "action");
-    statusBadge.textContent = "● Signaling Connected";
-    statusBadge.className =
-      "bg-amber-950/60 border border-amber-500/30 text-amber-400 text-xs font-mono px-3 py-1.5 rounded-full";
+    statusBadge.textContent = "Signaling Connected";
+    statusDot.className = "w-2 h-2 rounded-full bg-amber-500";
   };
 
   // Handle incoming signaling messages relayed from the remote peer
@@ -74,12 +74,11 @@ function connectSignaling() {
     }
   };
 
-  ws.onerror = (err) => log(`WebSocket error: ${err.message}`, "err");
+  ws.onerror = (err) => log(`WebSocket error`, "err");
   ws.onclose = () => {
     log("Disconnected from signaling server", "err");
-    statusBadge.textContent = "● Disconnected";
-    statusBadge.className =
-      "bg-rose-950/60 border border-rose-500/30 text-rose-400 text-xs font-mono px-3 py-1.5 rounded-full";
+    statusBadge.textContent = "Disconnected";
+    statusDot.className = "w-2 h-2 rounded-full bg-rose-500";
   };
 }
 
@@ -120,24 +119,20 @@ function createPeerConnection(isCaller) {
 // 3. Configure Event Listeners for the Direct Data Channel Pipeline
 function setupDataChannelHandlers() {
   dataChannel.onopen = () => {
-    log("🎉 P2P Data Channel OPEN and ready!", "peer");
-    statusBadge.textContent = "● P2P Connected";
-    statusBadge.className =
-      "bg-emerald-950/60 border border-emerald-500/30 text-emerald-400 text-xs font-mono px-3 py-1.5 rounded-full";
+    log("P2P Data Channel open and ready", "peer");
+    statusBadge.textContent = "P2P Connected";
+    statusDot.className = "w-2 h-2 rounded-full bg-emerald-500";
+    
     msgInput.disabled = false;
     sendBtn.disabled = false;
-    sendBtn.classList.remove("cursor-not-allowed");
-
     fileInput.disabled = false;
     sendFileBtn.disabled = false;
-    sendFileBtn.classList.remove("cursor-not-allowed");
   };
 
   dataChannel.onclose = () => {
     log("Data Channel closed", "err");
     msgInput.disabled = true;
     sendBtn.disabled = true;
-
     fileInput.disabled = true;
     sendFileBtn.disabled = true;
   };
@@ -154,7 +149,7 @@ function setupDataChannelHandlers() {
           receivedBuffers = [];
           receivedSize = 0;
           log(
-            `📥 Incoming file: ${incomingFileMeta.name} (${incomingFileMeta.size} bytes)`,
+            `Incoming file: ${incomingFileMeta.name} (${incomingFileMeta.size} bytes)`,
             "peer",
           );
           return; // Stop here so it doesn't log as a generic chat message
@@ -231,11 +226,11 @@ msgInput.addEventListener("keypress", (e) => {
 });
 
 document.getElementById("btn-clear").addEventListener("click", () => {
-  logBox.innerHTML = '<div class="text-slate-500">// Log cleared.</div>';
+  logBox.innerHTML = '<div class="text-zinc-600">// Log cleared.</div>';
 });
 
 // -------------------------------------------
-// 🗃️ File handling through binary streaming
+// File handling through binary streaming
 // -------------------------------------------
 
 // ==========================================
@@ -307,7 +302,7 @@ reader.onload = (e) => {
   if (offset < fileToSend.size) {
     readNextChunk();
   } else {
-    log("🎉 File transmission complete!", "peer");
+    log("File transmission complete.", "peer");
     fileToSend = null;
   }
 };
@@ -340,7 +335,7 @@ function handleIncomingData(event) {
 
     // Check if we have received all bytes
     if (incomingFileMeta && receivedSize >= incomingFileMeta.size) {
-      log(`📥 File received completely! Reassembling blob...`, "peer");
+      log(`File received. Reassembling...`, "peer");
 
       // Combine all ArrayBuffers into a single massive Blob
       const completeBlob = new Blob(receivedBuffers);
@@ -348,7 +343,7 @@ function handleIncomingData(event) {
 
       // Create a clickable download link in your log box or UI
       log(
-        `✅ Ready for download: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-indigo-400 underline font-bold">${incomingFileMeta.name}</a>`,
+        `Ready: <a href="${downloadUrl}" download="${incomingFileMeta.name}" class="text-zinc-200 underline font-medium hover:text-white transition-colors">${incomingFileMeta.name}</a>`,
         "peer",
       );
 
